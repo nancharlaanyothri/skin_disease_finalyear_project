@@ -1,116 +1,124 @@
 import streamlit as st
+import torch
 import numpy as np
 from PIL import Image
-import tensorflow as tf
+from transformers import AutoImageProcessor, AutoModelForImageClassification
 
-# ---------------------------
-# Page Config
-# ---------------------------
+# -------------------------------------------------
+# PAGE CONFIG
+# -------------------------------------------------
 st.set_page_config(
-    page_title="Skin Disease Detection",
-    page_icon="🩺",
+    page_title=" Skin Disease Prediction",
+    page_icon="🧬",
     layout="wide"
 )
 
-# ---------------------------
-# Custom Dark CSS
-# ---------------------------
-st.markdown("""
-    <style>
-    body {
-        background-color: #0f172a;
-    }
-    .main {
-        background-color: #0f172a;
-        color: white;
-    }
-    .title {
-        font-size: 42px;
-        font-weight: bold;
-        color: #22d3ee;
-    }
-    .subtitle {
-        font-size: 18px;
-        color: #cbd5e1;
-    }
-    .card {
-        background-color: #1e293b;
-        padding: 20px;
-        border-radius: 15px;
-        box-shadow: 0px 0px 15px rgba(0,0,0,0.5);
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# ---------------------------
-# Load Model
-# ---------------------------
+# -------------------------------------------------
+# LOAD HUGGINGFACE MODEL
+# -------------------------------------------------
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("skin_disease_model.keras")
+    processor = AutoImageProcessor.from_pretrained("Ateeqq/skin-disease-prediction-exp-v1")
+    model = AutoModelForImageClassification.from_pretrained("Ateeqq/skin-disease-prediction-exp-v1")
+    return processor, model
 
-model = load_model()
+processor, model = load_model()
 
-class_names = ['acne', 'eczema', 'melanoma', 'psoriasis', 'ringworm']
+# -------------------------------------------------
+# THEME TOGGLE
+# -------------------------------------------------
+mode = st.sidebar.radio("Select Theme", ["Dark 🌙", "Light ☀️"])
 
-# ---------------------------
-# Header Section
-# ---------------------------
-st.markdown('<div class="title">Skin Disease Detection</div>', unsafe_allow_html=True)
-st.markdown('<div class="subtitle">AI-powered early skin condition diagnosis</div>', unsafe_allow_html=True)
+if mode == "Dark 🌙":
+    bg = "#0f172a"
+    text = "white"
+else:
+    bg = "#f8fafc"
+    text = "black"
 
-st.write("")
+st.markdown(f"""
+<style>
+.main {{
+    background-color: {bg};
+    color: {text};
+}}
+.card {{
+    background-color: #1e293b;
+    padding: 25px;
+    border-radius: 20px;
+    box-shadow: 0px 4px 20px rgba(0,0,0,0.3);
+}}
+</style>
+""", unsafe_allow_html=True)
 
-# ---------------------------
-# Patient Info Section
-# ---------------------------
-st.markdown("## 🧑 Patient Information")
+# -------------------------------------------------
+# HEADER
+# -------------------------------------------------
+st.title("🧬 AI Skin Disease Detection")
+st.caption("Powered by HuggingFace Deep Learning Model")
 
-col1, col2 = st.columns(2)
+# -------------------------------------------------
+# SIDEBAR PATIENT INFO
+# -------------------------------------------------
+st.sidebar.header("Patient Info")
+name = st.sidebar.text_input("Name")
+age = st.sidebar.number_input("Age", 1, 120)
+gender = st.sidebar.selectbox("Gender", ["Male", "Female", "Other"])
 
-with col1:
-    name = st.text_input("Name")
-    age = st.number_input("Age", 1, 120)
-    gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+# -------------------------------------------------
+# IMAGE UPLOAD
+# -------------------------------------------------
+uploaded_file = st.file_uploader("Upload Skin Image", type=["jpg", "png", "jpeg"])
 
-with col2:
-    location = st.text_input("Location")
-    uploaded_file = st.file_uploader("Upload Skin Image", type=["jpg", "png", "jpeg"])
+# -------------------------------------------------
+# PREDICTION FUNCTION
+# -------------------------------------------------
+def predict(image):
+    inputs = processor(images=image, return_tensors="pt")
 
-# ---------------------------
-# Prediction Function
-# ---------------------------
-def predict_image(image):
-    image = image.resize((224, 224))
-    img_array = np.array(image) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+    with torch.no_grad():
+        outputs = model(**inputs)
 
-    prediction = model.predict(img_array)
-    predicted_class = class_names[np.argmax(prediction)]
-    confidence = round(100 * np.max(prediction), 2)
+    logits = outputs.logits
+    probs = torch.nn.functional.softmax(logits, dim=1)
+    confidence, predicted_class = torch.max(probs, dim=1)
 
-    return predicted_class, confidence
+    label = model.config.id2label[predicted_class.item()]
+    conf = round(confidence.item() * 100, 2)
 
-# ---------------------------
-# Show Result
-# ---------------------------
-if st.button("🔍 Diagnose"):
+    return label, conf, probs[0].numpy()
+
+# -------------------------------------------------
+# PREDICT BUTTON
+# -------------------------------------------------
+if st.button("🔍 Analyze"):
+
     if uploaded_file is not None:
         image = Image.open(uploaded_file).convert("RGB")
-
         st.image(image, width=300)
 
-        result, confidence = predict_image(image)
+        result, confidence, probabilities = predict(image)
 
         st.markdown("## 🧪 Diagnosis Result")
 
         st.markdown(f"""
         <div class="card">
-        <h3 style="color:#22c55e;">Diagnosed with: {result.upper()}</h3>
-        <p>Confidence: {confidence}%</p>
-        <p>Please consult a certified dermatologist for medical confirmation.</p>
+            <h2 style="color:#22c55e;">{result.upper()}</h2>
+            <h4>Confidence: {confidence}%</h4>
+            <p>Please consult a dermatologist for medical advice.</p>
         </div>
         """, unsafe_allow_html=True)
 
+        # Probability Chart
+        labels = list(model.config.id2label.values())
+
+        prob_data = {
+            labels[i]: float(probabilities[i]) * 100
+            for i in range(len(labels))
+        }
+
+        st.subheader("Prediction Confidence for All Classes")
+        st.bar_chart(prob_data)
+
     else:
-        st.warning("Please upload an image.")
+        st.warning("Please upload an image first.")
