@@ -1,5 +1,5 @@
-streamlit
-transformers
+streamlit==1.31.0
+transformers==4.37.2
+torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
 pillow
 numpy
-torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
